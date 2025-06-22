@@ -10,6 +10,7 @@ import base64
 import sys
 from datetime import datetime
 import traceback
+import logging
 
 # Caricamento variabili ambiente
 from dotenv import load_dotenv
@@ -199,6 +200,7 @@ FORMATO JSON:
             return chart_base64
 
         except Exception as e:
+            logging.error(f"Error generating matplotlib radar chart: {e}", exc_info=True)
             return self.create_html_fallback(analyses)
 
     def create_html_fallback(self, analyses):
@@ -207,7 +209,8 @@ FORMATO JSON:
             colors = ['#dc2626', '#fbbf24', '#b91c1c', '#f59e0b']
 
             html = '<div style="background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%); padding: 40px; border-radius: 16px; text-align: center; border: 2px solid #dc2626;">'
-            html += '<h3 style="color: #fbbf24; margin-bottom: 30px;">📊 Radar Chart - Iron Man Style</h3>'
+            html += '<h3 style="color: #fbbf24; margin-bottom: 10px;">📊 Fallback Radar Visualization</h3>'
+            html += '<p style="color: #ccc; font-size: 0.9em; margin-bottom: 20px;">Matplotlib chart generation failed. This is a stylized placeholder. Please refer to the detailed scores in the report.</p>'
 
             # Radar visuale
             html += '<div style="position: relative; width: 400px; height: 400px; margin: 0 auto; border: 3px solid #dc2626; border-radius: 50%; background: radial-gradient(circle, rgba(220, 38, 38, 0.1) 0%, rgba(0, 0, 0, 0.4) 100%);">'
@@ -268,40 +271,79 @@ FORMATO JSON:
             for analysis in analyses:
                 report["detailed_comparison"][analysis.participant_name] = analysis.to_dict()
 
-            # Insights automatici
-            if len(analyses) >= 2:
-                p1, p2 = analyses[0], analyses[1]
+            # Insights automatici potenziati
+            report["insights"].append(f"📊 Analisi completata per {len(analyses)} partecipanti.")
 
-                # Converti a int per sicurezza
-                p1_tech = int(p1.rigorosita_tecnica)
-                p2_tech = int(p2.rigorosita_tecnica)
-                p1_div = int(p1.approccio_divulgativo)
-                p2_div = int(p2.approccio_divulgativo)
+            if len(analyses) >= 1: # Need at least one for some insights
+                for criterion in self.analysis_criteria:
+                    criterion_label = criterion.replace("_", " ").capitalize()
 
-                if p1_tech > p2_tech:
-                    diff = p1_tech - p2_tech
-                    report["insights"].append(f"🔥 {p1.participant_name} eccelle in rigorosità tecnica (+{diff} punti)")
-                elif p2_tech > p1_tech:
-                    diff = p2_tech - p1_tech
-                    report["insights"].append(f"🔥 {p2.participant_name} eccelle in rigorosità tecnica (+{diff} punti)")
+                    # Get all scores for the current criterion, ensuring they are integers
+                    scores = []
+                    for analysis in analyses:
+                        score_value = getattr(analysis, criterion, None)
+                        if score_value is not None:
+                            try:
+                                scores.append(int(score_value))
+                            except ValueError:
+                                # Handle case where score might not be convertible to int, though dataclass types should ensure this
+                                logging.warning(f"Could not convert score for {criterion} for participant {analysis.participant_name} to int.")
+                                scores.append(0) # Default or skip
+                        else:
+                            scores.append(0) # Default if attribute somehow missing
 
-                if p1_div > p2_div:
-                    diff = p1_div - p2_div
-                    report["insights"].append(f"⚡ {p1.participant_name} è più divulgativo (+{diff} punti)")
-                elif p2_div > p1_div:
-                    diff = p2_div - p1_div
-                    report["insights"].append(f"⚡ {p2.participant_name} è più divulgativo (+{diff} punti)")
+                    if not scores: # Should not happen if analyses is not empty
+                        continue
 
-                # Insights aggiuntivi
-                if abs(p1_tech - p2_tech) <= 1:
-                    report["insights"].append("🎯 Livello tecnico equilibrato tra i partecipanti")
-                if abs(p1_div - p2_div) <= 1:
-                    report["insights"].append("⚖️ Approccio divulgativo molto simile")
+                    max_score = -1
+                    min_score = 11 # Scores are 1-10
+
+                    # Recalculate max_score and min_score based on actual scores present
+                    # This avoids issues if all scores are 0 due to errors or missing data
+                    if any(s > 0 for s in scores): # Check if there are any actual scores
+                        max_score = max(s for s in scores if s is not None)
+                        min_score = min(s for s in scores if s is not None and s > 0) # Min of actual scores
+                    else: # All scores are 0 or None
+                        max_score = 0
+                        min_score = 0
+
+
+                    best_performers = [analyses[i].participant_name for i, score in enumerate(scores) if score == max_score and max_score > 0]
+                    worst_performers = [analyses[i].participant_name for i, score in enumerate(scores) if score == min_score and max_score > min_score] # Only show if there's a difference from max
+
+                    if best_performers:
+                        if len(best_performers) == len(analyses) and len(analyses) > 1 and max_score > 0 : # All are equally best
+                             report["insights"].append(f"🏆 Tutti i partecipanti mostrano un punteggio massimo ({max_score}/10) in {criterion_label}.")
+                        elif len(best_performers) == 1:
+                            report["insights"].append(f"🥇 {best_performers[0]} eccelle in {criterion_label} ({max_score}/10).")
+                        elif len(best_performers) > 1 :
+                             report["insights"].append(f"🥇 {', '.join(best_performers)} guidano in {criterion_label} ({max_score}/10).")
+
+                    if worst_performers and len(worst_performers) < len(analyses): # Don't show if all are 'worst' (e.g. all got min score)
+                        if len(worst_performers) == 1:
+                             report["insights"].append(f"🔻 {worst_performers[0]} ha il punteggio più basso in {criterion_label} ({min_score}/10).")
+                        elif len(worst_performers) > 1:
+                             report["insights"].append(f"🔻 {', '.join(worst_performers)} hanno i punteggi più bassi in {criterion_label} ({min_score}/10).")
+
+                # Example of pairwise comparison (can be extensive if many participants)
+                if len(analyses) == 2:
+                    p1, p2 = analyses[0], analyses[1]
+                    p1_tech = int(p1.rigorosita_tecnica)
+                    p2_tech = int(p2.rigorosita_tecnica)
+                    if abs(p1_tech - p2_tech) <= 1:
+                        report["insights"].append("🎯 Livello tecnico equilibrato tra i due partecipanti.")
+                    elif p1_tech > p2_tech:
+                        report["insights"].append(f"🔥 {p1.participant_name} è più forte in rigorosità tecnica rispetto a {p2.participant_name}.")
+                    else:
+                        report["insights"].append(f"🔥 {p2.participant_name} è più forte in rigorosità tecnica rispetto a {p1.participant_name}.")
+
 
         except Exception as e:
+            logging.error(f"Errore nella generazione del report comparativo: {e}", exc_info=True)
+            # Fallback insights if there was an error during report generation itself
             report["insights"] = [
-                "🔥 Analisi comparativa completata",
-                f"📊 {len(analyses)} partecipanti analizzati con successo"
+                "⚠️ Si è verificato un errore durante la generazione degli insights dettagliati.",
+                f"📊 {len(analyses)} partecipanti sono stati comunque processati per i punteggi base."
             ]
 
         return report
@@ -367,15 +409,26 @@ def create_heuristic_analysis(name, text):
 
 
 # Configurazione
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', 'your-google-api-key-here')
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY') # No string default from getenv
 
-# Inizializza analyzer
-if GOOGLE_API_KEY and GOOGLE_API_KEY != 'your-google-api-key-here':
-    analyzer = DebateLensAnalyzer(GOOGLE_API_KEY)
-    AI_MODE = True
+analyzer = None # Default to None
+AI_MODE = False # Default to False
+
+if GOOGLE_API_KEY and GOOGLE_API_KEY != 'your-google-api-key-here' and GOOGLE_API_KEY.strip() != "":
+    try:
+        analyzer = DebateLensAnalyzer(GOOGLE_API_KEY)
+        AI_MODE = True
+        logging.info("Google Gemini AI configured successfully.")
+    except Exception as e:
+        logging.error(f"Failed to initialize DebateLensAnalyzer with API key: {e}", exc_info=True)
+        # analyzer remains None, AI_MODE remains False
+        # The print statements at startup will reflect that AI is not configured.
 else:
-    analyzer = DebateLensAnalyzer("fake-key")
-    AI_MODE = False
+    # This else block covers cases where API_KEY is None, the placeholder string, or an empty string.
+    # analyzer remains None, AI_MODE remains False
+    # No need to instantiate DebateLensAnalyzer with "fake-key" if it won't be used.
+    logging.info("Google API Key not provided or is placeholder. Using heuristic mode.")
+
 
 # Flask App
 app = Flask(__name__)
@@ -385,12 +438,13 @@ CORS(app)
 # Routes
 @app.route('/')
 def serve_frontend():
-    return send_from_directory('.', 'index.html')
+    return send_from_directory('static', 'index.html')
 
 
-@app.route('/<path:filename>')
-def serve_static(filename):
-    return send_from_directory('.', filename)
+# Removed the insecure route:
+# @app.route('/<path:filename>')
+# def serve_static(filename):
+#     return send_from_directory('.', filename)
 
 
 @app.route('/api/analyze', methods=['POST'])
@@ -402,31 +456,56 @@ def analyze_debate():
         if not data or len(data.get('participants', [])) < 2:
             return jsonify({'error': 'Servono almeno 2 partecipanti'}), 400
 
-        participants = data['participants']
+        participants_data = data['participants']
         analyses = []
+        participant_analysis_details = [] # Stores details about how each participant was analyzed
 
-        # Analizza ogni partecipante
-        for participant in participants:
-            name = participant.get('name', 'Partecipante')
-            text = participant.get('text', '')
+        MAX_TEXT_LENGTH = 10000 # Max characters per participant text
+
+        # Valida e analizza ogni partecipante
+        for p_data in participants_data:
+            name = p_data.get('name', 'Partecipante')
+            text = p_data.get('text', '')
+            analysis_status = {"name": name, "type": "heuristic", "error": None}
 
             if not text.strip():
+                analysis_status["error"] = "Testo vuoto fornito."
+                # analyses.append(create_heuristic_analysis(name, "")) # Or skip adding to main analyses list
+                participant_analysis_details.append(analysis_status)
                 continue
+
+            if len(text) > MAX_TEXT_LENGTH:
+                # This case is already handled and returns, so won't be hit if previous check is active.
+                # However, if we were to collect all errors first, this would be relevant.
+                # For now, the immediate return is fine.
+                return jsonify({'error': f"Il testo per '{name}' supera la lunghezza massima di {MAX_TEXT_LENGTH} caratteri."}), 400
 
             if AI_MODE:
                 try:
-                    analysis = analyzer.analyze_participant(text, name)
-                    if analysis:
-                        analyses.append(analysis)
-                    else:
+                    analysis_obj = analyzer.analyze_participant(text, name)
+                    if analysis_obj:
+                        analyses.append(analysis_obj)
+                        analysis_status["type"] = "ai"
+                    else: # AI analysis failed, analyzer.last_error should be set
                         analyses.append(create_heuristic_analysis(name, text))
-                except:
+                        analysis_status["error"] = analyzer.last_error or "Analisi AI fallita, fallback a euristica."
+                        analyzer.last_error = None # Reset last_error after consuming it
+                except Exception as e_inner:
                     analyses.append(create_heuristic_analysis(name, text))
+                    analysis_status["error"] = f"Eccezione durante analisi AI: {str(e_inner)}"
             else:
                 analyses.append(create_heuristic_analysis(name, text))
 
+            participant_analysis_details.append(analysis_status)
+
         if len(analyses) < 2:
-            return jsonify({'error': 'Analisi fallita'}), 500
+            # This check might need adjustment if empty texts are skipped from `analyses` list
+            # but are present in `participant_analysis_details`.
+            # For now, assuming `analyses` must have at least 2 valid entries.
+            return jsonify({
+                'error': 'Analisi fallita o partecipanti insufficienti con testo valido.',
+                'participant_analysis_status': participant_analysis_details
+            }), 500
 
         # Genera risultati
         chart_data = analyzer.create_radar_chart(analyses)
@@ -438,7 +517,8 @@ def analyze_debate():
             'chart_data': chart_data,
             'report': report,
             'version': 'DebateLens Craicek\'s Version',
-            'ai_mode': AI_MODE
+            'ai_mode': AI_MODE,
+            'participant_analysis_status': participant_analysis_details
         })
 
     except Exception as e:

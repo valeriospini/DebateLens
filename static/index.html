@@ -494,12 +494,14 @@
             document.getElementById('radarContainer').style.display = 'block';
             document.getElementById('insightsContainer').style.display = 'block';
 
-            // Determina modalità
-            const isAiMode = data.ai_mode || false;
-            const modeText = isAiMode ? 'AI Analysis' : 'Smart Analysis';
+            // Global AI mode (intended mode)
+            const globalAiMode = data.ai_mode || false;
+            // Participant-specific analysis details
+            const participantStatuses = data.participant_analysis_status || [];
 
-            console.log('📊 Modalità rilevata:', modeText);
+            console.log('📊 Global AI Mode:', globalAiMode);
             console.log('📊 Chart data presente:', !!data.chart_data);
+            console.log('📊 Participant Statuses:', participantStatuses);
 
             // Mostra il grafico radar - PRIORITÀ ASSOLUTA
             if (data.chart_data) {
@@ -552,45 +554,51 @@
                     const insightCard = document.createElement('div');
                     insightCard.className = 'insight-card';
 
-                    // Gestisci struttura dati flessibile
-                    const scores = analysis.scores || analysis;
+                    const pStatus = participantStatuses.find(s => s.name === name) || { type: 'heuristic', error: 'Status not found' };
+                    const actualAnalysisType = pStatus.type === 'ai' ? 'AI Analysis' : 'Smart Analysis (Heuristic)';
+                    const errorMsg = pStatus.error ? `<p style="color:red; font-size:0.8em; margin-top:5px;">Note: ${pStatus.error}</p>` : "";
+
+                    // Gestisci struttura dati flessibile (scores might be nested or direct)
+                    const scores = analysis.scores || analysis; // 'analysis' itself might be the scores if not nested
                     const explanations = analysis.explanations || {};
 
                     insightCard.innerHTML = `
-                        <h4>🎯 ${name} (${modeText})</h4>
+                        <h4>🎯 ${name} (${actualAnalysisType})</h4>
+                        ${errorMsg}
                         <div class="score-grid">
-                            <div class="score-item">Rigorosità Tecnica: <strong>${scores.rigorosita_tecnica}/10</strong></div>
-                            <div class="score-item">Uso Dati: <strong>${scores.uso_dati_oggettivi}/10</strong></div>
-                            <div class="score-item">Divulgativo: <strong>${scores.approccio_divulgativo}/10</strong></div>
-                            <div class="score-item">Stile: <strong>${scores.stile_comunicativo}/10</strong></div>
-                            <div class="score-item">Focalizzazione: <strong>${scores.focalizzazione_argomento}/10</strong></div>
-                            <div class="score-item">Pratico: <strong>${scores.orientamento_pratico}/10</strong></div>
+                            <div class="score-item">Rigorosità Tecnica: <strong>${scores.rigorosita_tecnica !== undefined ? scores.rigorosita_tecnica : 'N/A'}/10</strong></div>
+                            <div class="score-item">Uso Dati: <strong>${scores.uso_dati_oggettivi !== undefined ? scores.uso_dati_oggettivi : 'N/A'}/10</strong></div>
+                            <div class="score-item">Divulgativo: <strong>${scores.approccio_divulgativo !== undefined ? scores.approccio_divulgativo : 'N/A'}/10</strong></div>
+                            <div class="score-item">Stile: <strong>${scores.stile_comunicativo !== undefined ? scores.stile_comunicativo : 'N/A'}/10</strong></div>
+                            <div class="score-item">Focalizzazione: <strong>${scores.focalizzazione_argomento !== undefined ? scores.focalizzazione_argomento : 'N/A'}/10</strong></div>
+                            <div class="score-item">Pratico: <strong>${scores.orientamento_pratico !== undefined ? scores.orientamento_pratico : 'N/A'}/10</strong></div>
                         </div>
                         ${explanations.rigorosita_tecnica ? `
                         <div style="margin-top: 15px; padding: 10px; background: rgba(220, 38, 38, 0.1); border-radius: 8px;">
-                            <strong>💡 ${isAiMode ? 'AI' : 'Smart'} Insight:</strong><br>
+                            <strong>💡 ${pStatus.type === 'ai' ? 'AI' : 'Smart'} Insight (Rigorosità Tecnica):</strong><br>
                             <small>${explanations.rigorosita_tecnica}</small>
                         </div>
                         ` : ''}
+                        <!-- You could add other explanations here too if available -->
                     `;
                     insightsContainer.appendChild(insightCard);
                 });
             }
 
-            // Mostra insights automatici
+            // Mostra insights automatici (uses globalAiMode for the general message)
             if (data.report && data.report.insights && data.report.insights.length > 0) {
                 console.log('🔥 Rendering insights automatici');
 
                 const insightsCard = document.createElement('div');
                 insightsCard.className = 'insight-card';
-                insightsCard.style.gridColumn = '1 / -1';
+                insightsCard.style.gridColumn = '1 / -1'; // Make it span all columns
                 insightsCard.innerHTML = `
-                    <h4>🔥 Insights Automatici - ${modeText}</h4>
-                    <ul style="margin-top: 10px;">
-                        ${data.report.insights.map(insight => `<li style="margin-bottom: 5px;">${insight}</li>`).join('')}
+                    <h4>🔥 Insights Comparativi Globali</h4>
+                    <ul style="margin-top: 10px; padding-left: 20px;">
+                        ${data.report.insights.map(insight => `<li style="margin-bottom: 8px;">${insight}</li>`).join('')}
                     </ul>
                     <p style="margin-top: 15px; font-size: 0.9rem; color: #666; text-align: center;">
-                        <em>⚡ ${data.version} - ${isAiMode ? 'Powered by Google Gemini' : 'Analisi Euristica Avanzata'}</em>
+                        <em>⚡ ${data.version} - Modalità Globale: ${globalAiMode ? 'Powered by Google Gemini' : 'Analisi Euristica Avanzata'}</em>
                     </p>
                 `;
                 insightsContainer.appendChild(insightsCard);
