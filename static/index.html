@@ -293,9 +293,28 @@
         </header>
 
         <div class="main-card">
+            <!-- YouTube Transcription Section -->
+            <div class="form-section" id="youtubeSection">
+                <h3><span class="icon">🎤</span>Transcrivi da YouTube</h3>
+                <div class="form-group">
+                    <label for="youtubeUrl">URL Video YouTube</label>
+                    <input type="text" id="youtubeUrl" name="youtubeUrl" placeholder="Incolla qui l'URL del video YouTube...">
+                </div>
+                <button type="button" class="analyze-btn" id="transcribeYouTubeBtn" style="margin-bottom: 15px; background: linear-gradient(135deg, #5A5A5A 0%, #333333 100%);">
+                    📝 Transcrivi Video
+                </button>
+                <div class="form-group">
+                    <label for="youtubeTranscriptOutput">Trascrizione Video:</label>
+                    <textarea id="youtubeTranscriptOutput" name="youtubeTranscriptOutput" rows="8" readonly placeholder="La trascrizione del video apparirà qui..."></textarea>
+                </div>
+                <div id="youtubeTranscriptionStatus" style="margin-top: 10px; text-align: center;"></div>
+            </div>
+
+            <hr style="margin: 30px 0; border-color: #e2e8f0;">
+
             <form id="analysisForm">
                 <div class="form-section">
-                    <h3><span class="icon">👥</span>Partecipanti al Dibattito</h3>
+                    <h3><span class="icon">👥</span>Partecipanti al Dibattito (usa testo sopra o incolla qui)</h3>
 
                     <div id="participants-container">
                         <!-- Partecipante 1 -->
@@ -660,6 +679,50 @@
                 this.classList.remove('active');
             }, true);
         });
+
+        // YouTube Transcription Logic
+        const youtubeUrlInput = document.getElementById('youtubeUrl');
+        const transcribeYouTubeBtn = document.getElementById('transcribeYouTubeBtn');
+        const youtubeTranscriptOutput = document.getElementById('youtubeTranscriptOutput');
+        const youtubeTranscriptionStatus = document.getElementById('youtubeTranscriptionStatus');
+
+        transcribeYouTubeBtn.addEventListener('click', async function() {
+            const url = youtubeUrlInput.value.trim();
+            if (!url) {
+                alert('Inserisci un URL YouTube valido.');
+                return;
+            }
+
+            youtubeTranscriptionStatus.innerHTML = '<div class="spinner"></div><p>Trascrizione in corso... Potrebbe richiedere del tempo.</p>';
+            youtubeTranscriptOutput.value = ''; // Clear previous transcript
+            transcribeYouTubeBtn.disabled = true;
+
+            try {
+                const response = await fetch('/api/transcribe_youtube', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ youtube_url: url })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    youtubeTranscriptOutput.value = data.transcript;
+                    youtubeTranscriptionStatus.innerHTML = '<p style="color: green;">Trascrizione completata!</p>';
+                } else {
+                    throw new Error(data.error || `Errore server: ${response.status}`);
+                }
+
+            } catch (error) {
+                console.error('Errore trascrizione YouTube:', error);
+                youtubeTranscriptionStatus.innerHTML = `<p style="color: red;">Errore: ${error.message}</p>`;
+            } finally {
+                transcribeYouTubeBtn.disabled = false;
+            }
+        });
+
     </script>
 </body>
 </html>

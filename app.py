@@ -434,6 +434,25 @@ else:
 app = Flask(__name__)
 CORS(app)
 
+# Imports for YouTube Transcription
+import yt_dlp # For downloading YouTube audio
+import whisper # For audio transcription
+import tempfile # For handling temporary audio files
+# os is already imported, but ensure it's available for file deletion if needed by tempfile explicitly.
+
+# Global variable for Whisper model (load once)
+# Loading the model can be time-consuming, so we should do it once when the app starts.
+# For simplicity in this step, I might load it within the request first,
+# but a production app should load it globally or on first request.
+# Let's try loading it globally but handle potential errors.
+WHISPER_MODEL = None
+try:
+    WHISPER_MODEL = whisper.load_model("base") # Using the base model for now
+    logging.info("Whisper model loaded successfully.")
+except Exception as e:
+    logging.error(f"Error loading Whisper model: {e}", exc_info=True)
+    WHISPER_MODEL = None # Ensure it's None if loading failed
+
 
 # Routes
 @app.route('/')
@@ -534,6 +553,79 @@ def health_check():
         'ai_mode': AI_MODE,
         'timestamp': datetime.now().isoformat()
     })
+
+
+@app.route('/api/transcribe_youtube', methods=['POST'])
+def transcribe_youtube_audio():
+    if WHISPER_MODEL is None:
+        return jsonify({'error': 'Whisper model not loaded. Transcription unavailable.'}), 503
+
+    data = request.get_json()
+    youtube_url = data.get('youtube_url')
+
+    if not youtube_url:
+        return jsonify({'error': 'YouTube URL not provided.'}), 400
+
+    temp_audio_file = None
+    try:
+        # 1. Download Audio using yt-dlp
+        # Create a temporary file to store the audio
+        # We need a named temporary file that yt-dlp can write to and whisper can read.
+        # tempfile.NamedTemporaryFile can be tricky with reopening on some OS,
+        # so constructing path with tempfile.gettempdir() and a unique name is safer.
+
+        temp_dir = tempfile.gettempdir()
+        # Create a unique filename. Using a simple approach for now.
+        # For production, consider using uuid for truly unique names.
+        temp_filename = f"youtube_audio_{os.urandom(8).hex()}.mp3"
+        temp_audio_path = os.path.join(temp_dir, temp_filename)
+
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': temp_audio_path, # Output template for the filename
+            'noplaylist': True,
+            'quiet': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3', # Output format
+                'preferredquality': '192', # Bitrate
+            }],
+        }
+
+        logging.info(f"Attempting to download audio from: {youtube_url} to {temp_audio_path}")
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([youtube_url])
+
+        # Check if file was downloaded (yt-dlp might not raise error for some failed downloads)
+        if not os.path.exists(temp_audio_path) or os.path.getsize(temp_audio_path) == 0:
+            logging.error(f"Audio download failed or resulted in an empty file for URL: {youtube_url}")
+            return jsonify({'error': 'Failed to download audio from the YouTube URL. The video might be private, unavailable, or the URL is incorrect.'}), 500
+
+        logging.info(f"Audio downloaded successfully: {temp_audio_path}")
+        temp_audio_file = temp_audio_path # Keep track for deletion
+
+        # 2. Transcribe Audio using Whisper
+        logging.info(f"Starting transcription for {temp_audio_file}...")
+        result = WHISPER_MODEL.transcribe(temp_audio_file, fp16=False) # fp16=False for CPU
+        transcribed_text = result['text']
+        logging.info("Transcription complete.")
+
+        return jsonify({'transcript': transcribed_text})
+
+    except yt_dlp.utils.DownloadError as e:
+        logging.error(f"yt-dlp DownloadError for URL {youtube_url}: {e}", exc_info=True)
+        return jsonify({'error': f'Error downloading video: {str(e).splitlines()[-1] if str(e) else "Unknown yt-dlp error"}'}), 500
+    except Exception as e:
+        logging.error(f"Error during YouTube transcription for URL {youtube_url}: {e}", exc_info=True)
+        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
+    finally:
+        # 3. Cleanup: Delete the temporary audio file
+        if temp_audio_file and os.path.exists(temp_audio_file):
+            try:
+                os.remove(temp_audio_file)
+                logging.info(f"Temporary audio file {temp_audio_file} deleted.")
+            except Exception as e_del:
+                logging.error(f"Error deleting temporary audio file {temp_audio_file}: {e_del}", exc_info=True)
 
 
 if __name__ == '__main__':
